@@ -14,10 +14,12 @@ impl Sprite {
     pub fn init() {
         let mut vbo: GLuint = 0;
         let mut ibo: GLuint = 0;
-        let pos_attrib;
-        let vertices: [Vector2; 4] = [
-            (-1.0, -1.0).into(), ( 1.0, -1.0).into(),
-            ( 1.0,  1.0).into(), (-1.0,  1.0).into(),
+        let (pos_attrib, tex_attrib);
+        let vertices: [Vertex; 4] = [
+            Vertex { position: ( 1.0,  1.0).into(), tex_coord: (1.0, 0.0).into(), },
+            Vertex { position: (-1.0,  1.0).into(), tex_coord: (0.0, 0.0).into(), },
+            Vertex { position: (-1.0, -1.0).into(), tex_coord: (0.0, 1.0).into(), },
+            Vertex { position: ( 1.0, -1.0).into(), tex_coord: (1.0, 1.0).into(), },
         ];
         let indices: [GLuint; 6] = [
             0, 1, 2,
@@ -48,11 +50,27 @@ impl Sprite {
 
             {
                 use std::ffi::CStr;
-                let pos_str = CStr::from_bytes_with_nul(b"position\0").unwrap();
-                pos_attrib = gl::GetAttribLocation(SPRITE_PRG, pos_str.as_ptr());
+                let attr_str = CStr::from_bytes_with_nul(b"position\0").unwrap();
+                pos_attrib = gl::GetAttribLocation(SPRITE_PRG, attr_str.as_ptr());
             }
-            gl::VertexAttribPointer(pos_attrib as _, 2, gl::FLOAT, gl::FALSE, 0, std::ptr::null());
+            gl::VertexAttribPointer(
+                pos_attrib as _, 2, gl::FLOAT, gl::FALSE,
+                std::mem::size_of::<Vertex>() as _,
+                std::ptr::null::<u8>().add(0) as _
+            );
             gl::EnableVertexAttribArray(pos_attrib as _);
+
+            {
+                use std::ffi::CStr;
+                let attr_str = CStr::from_bytes_with_nul(b"texCoord\0").unwrap();
+                tex_attrib = gl::GetAttribLocation(SPRITE_PRG, attr_str.as_ptr());
+            }
+            gl::VertexAttribPointer(
+                tex_attrib as _, 2, gl::FLOAT, gl::FALSE,
+                std::mem::size_of::<Vertex>() as _,
+                std::ptr::null::<u8>().add(std::mem::size_of::<Vector2>()) as _
+            );
+            gl::EnableVertexAttribArray(tex_attrib as _);
         }
     }
 
@@ -86,6 +104,7 @@ impl Sprite {
             gl::UniformMatrix3fv(
                 SPRITE_TNFM_UNI, 1, gl::FALSE, self.transform.matrix().0.as_ptr()
             );
+            gl::BindTexture(gl::TEXTURE_2D, self.texture.gl_id);
             gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, std::ptr::null());
         }
     }
@@ -99,6 +118,9 @@ impl Sprite {
                 #version 150
 
                 in vec2 position;
+                in vec2 texCoord;
+
+                out vec2 texCoordFrag;
 
                 uniform mat3 view;
                 uniform mat3 tnfm;
@@ -106,16 +128,21 @@ impl Sprite {
                 void main() {
                     vec3 pos = inverse(view) * tnfm * vec3(position, 1.0);
 
+                    texCoordFrag = texCoord;
                     gl_Position = vec4(pos.xy, 0.0, 1.0);
                 }
             \0").unwrap(),
             CStr::from_bytes_with_nul(b"
             #version 150
 
+            in vec2 texCoordFrag;
+
             out vec4 outColour;
 
+            uniform sampler2D tex;
+
             void main() {
-                outColour = vec4(1.0);
+                outColour = texture(tex, texCoordFrag);
             }
             \0").unwrap(),
         );
@@ -229,16 +256,46 @@ impl Transform {
 #[repr(C)]
 struct Vertex {
     position: Vector2,
-    tex_coords: Vector2,
+    tex_coord: Vector2,
 }
 
+#[derive(Copy, Clone)]
 pub struct Texture {
     gl_id: GLuint,
 }
 
 impl Texture {
+
     pub fn new(file_path: &std::path::Path) -> Self {
-        Texture { gl_id: 0 }
+        use std::fs::File;
+
+        let decoder = png::Decoder::new(File::open(file_path).unwrap());
+        let mut reader = decoder.read_info().unwrap();
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        let bytes = &buf[..info.buffer_size()];
+
+        assert_eq!(info.color_type, png::ColorType::Rgba, "Non-RGBA image");
+
+        let mut gl_id = 0;
+        unsafe {
+            gl::GenTextures(1, &mut gl_id);
+            gl::BindTexture(gl::TEXTURE_2D, gl_id);
+
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as _);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as _);
+
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as _);
+
+            gl::TexImage2D(
+                gl::TEXTURE_2D, 0, gl::RGBA as _,
+                info.width as _, info.height as _, 0, gl::RGBA, gl::UNSIGNED_BYTE,
+                bytes.as_ptr() as _
+            );
+        }
+
+        Self { gl_id }
     }
 }
 

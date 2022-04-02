@@ -1,5 +1,6 @@
 extern crate gl;
 extern crate sdl2;
+extern crate png;
 
 mod sprite;
 
@@ -27,14 +28,16 @@ fn main() {
     gl::load_with(|s| vid_sys.gl_get_proc_address(s) as *const _);
     Sprite::init();
 
-    unsafe { gl::ClearColor(0.7, 0.4, 0.5, 1.0); }
-
-    let mut spr = Sprite::new(Texture::new(Path::new(""))); {
+    unsafe { gl::ClearColor(0.25, 0.2, 0.3, 1.0); }
+    
+    let hard_tex = Texture::new(Path::new("assets/thispicgoeshard1.png"));
+    let evil_tex = Texture::new(Path::new("assets/thispicgoesevil1.png"));
+    let mut spr = Sprite::new(hard_tex); {
         spr.transform.origin = (0.0, 1.0).into();
         spr.transform.scale = (0.5, 0.05).into();
         spr.transform.translation = (0.0, 0.5).into();
     }
-    let mut square = Sprite::new(Texture::new(Path::new(""))); {
+    let mut square = Sprite::new(evil_tex); {
         square.transform.origin = (0.0, -1.0).into();
         square.transform.scale = (0.5, 0.4).into();
         square.transform.translation = (0.0, -0.5).into();
@@ -42,7 +45,7 @@ fn main() {
 
     let mut camera = Transform::identity(); {
         camera.translation = (1.0, 0.0).into();
-        camera.scale = (8.0, 8.0).into();
+        //camera.scale = (8.0, 8.0).into();
         camera.rotation = std::f32::consts::PI / 4f32;
     }
 
