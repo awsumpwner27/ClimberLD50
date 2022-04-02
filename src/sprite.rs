@@ -3,9 +3,11 @@ use gl::types::*;
 static mut SPRITE_PRG: GLuint = 0;
 static mut SPRITE_VAO: GLuint = 0;
 static mut SPRITE_TNFM_UNI: GLint = 0;
+static mut SPRITE_VIEW_UNI: GLint = 0;
 
 pub struct Sprite {
     pub transform: Transform,
+    pub texture: Texture,
 }
 
 impl Sprite {
@@ -54,16 +56,21 @@ impl Sprite {
         }
     }
 
-    pub fn new() -> Self {
+    pub fn new(texture: Texture) -> Self {
         Self {
             transform: Transform::identity(),
+            texture,
         }
     }
 
-    pub fn begin() {
+    pub fn begin(view: Transform) {
         unsafe {
             gl::BindVertexArray(SPRITE_VAO);
             gl::UseProgram(SPRITE_PRG);
+            
+            gl::UniformMatrix3fv(
+                SPRITE_VIEW_UNI, 1, gl::FALSE, view.matrix().0.as_ptr()
+            );
         }
     }
     
@@ -93,10 +100,11 @@ impl Sprite {
 
                 in vec2 position;
 
+                uniform mat3 view;
                 uniform mat3 tnfm;
 
                 void main() {
-                    vec3 pos = tnfm * vec3(position, 1.0);
+                    vec3 pos = inverse(view) * tnfm * vec3(position, 1.0);
 
                     gl_Position = vec4(pos.xy, 0.0, 1.0);
                 }
@@ -176,39 +184,66 @@ impl Sprite {
         {
             let tnfm_str = CStr::from_bytes_with_nul(b"tnfm\0").unwrap();
             SPRITE_TNFM_UNI = gl::GetUniformLocation(SPRITE_PRG, tnfm_str.as_ptr());
+            let view_str = CStr::from_bytes_with_nul(b"view\0").unwrap();
+            SPRITE_VIEW_UNI = gl::GetUniformLocation(SPRITE_PRG, view_str.as_ptr());
         }
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Transform {
     pub translation: Vector2,
-    pub scale: Vector2,
     pub rotation: f32,
+    pub scale: Vector2,
+    pub origin: Vector2,
 }
 
 impl Transform {
     pub fn identity() -> Self {
         Self {
             translation: Vector2::zero(),
-            scale: Vector2::one(),
             rotation: 0.0,
+            scale: Vector2::one(),
+            origin: Vector2::zero(),
         }
     }
 
     pub fn matrix(&self) -> Matrix3 {
         let (tx, ty) = self.translation.tuple();
-        let (sx, sy) = self.scale.tuple();
         let (rs, rc) = (self.rotation.sin(), self.rotation.cos());
+        let (sx, sy) = self.scale.tuple();
+        let o = self.origin.tuple();
+        let (ox, oy) = (
+            -o.0 * rc * sx + o.1 * rs * sx,
+            -o.0 * rs * sy - o.1 * rc * sy
+        );
 
         Matrix3 ([
             sx *  rc, sx * rs, 0.0,
             sy * -rs, sy * rc, 0.0,
-                 *tx,     *ty, 1.0,
+             ox + tx, oy + ty, 1.0,
         ])
     }
 }
 
 #[repr(C)]
+struct Vertex {
+    position: Vector2,
+    tex_coords: Vector2,
+}
+
+pub struct Texture {
+    gl_id: GLuint,
+}
+
+impl Texture {
+    pub fn new(file_path: &std::path::Path) -> Self {
+        Texture { gl_id: 0 }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Vector2 {
     pub x: f32,
     pub y: f32,
