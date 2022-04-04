@@ -4,10 +4,14 @@ static mut SPRITE_PRG: GLuint = 0;
 static mut SPRITE_VAO: GLuint = 0;
 static mut SPRITE_TNFM_UNI: GLint = 0;
 static mut SPRITE_VIEW_UNI: GLint = 0;
+static mut SPRITE_TEXA_UNI: GLint = 0;
+static mut SPRITE_TEXB_UNI: GLint = 0;
 
+#[derive(Clone, Copy)]
 pub struct Sprite {
     pub transform: Transform,
     pub texture: Texture,
+    pub sub_tex: (Vector2, Vector2),
 }
 
 impl Sprite {
@@ -78,6 +82,7 @@ impl Sprite {
         Self {
             transform: Transform::identity(),
             texture,
+            sub_tex: (Vector2::zero(), Vector2::one())
         }
     }
 
@@ -104,6 +109,8 @@ impl Sprite {
             gl::UniformMatrix3fv(
                 SPRITE_TNFM_UNI, 1, gl::FALSE, self.transform.matrix().0.as_ptr()
             );
+            gl::Uniform2fv(SPRITE_TEXA_UNI, 1, &self.sub_tex.0.x);
+            gl::Uniform2fv(SPRITE_TEXB_UNI, 1, &self.sub_tex.1.x);
             gl::BindTexture(gl::TEXTURE_2D, self.texture.gl_id);
             gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, std::ptr::null());
         }
@@ -124,11 +131,13 @@ impl Sprite {
 
                 uniform mat3 view;
                 uniform mat3 tnfm;
+                uniform vec2 subTexA;
+                uniform vec2 subTexB; 
 
                 void main() {
                     vec3 pos = inverse(view) * tnfm * vec3(position, 1.0);
 
-                    texCoordFrag = texCoord;
+                    texCoordFrag = mix(subTexA, subTexB, texCoord);
                     gl_Position = vec4(pos.xy, 0.0, 1.0);
                 }
             \0").unwrap(),
@@ -213,6 +222,10 @@ impl Sprite {
             SPRITE_TNFM_UNI = gl::GetUniformLocation(SPRITE_PRG, tnfm_str.as_ptr());
             let view_str = CStr::from_bytes_with_nul(b"view\0").unwrap();
             SPRITE_VIEW_UNI = gl::GetUniformLocation(SPRITE_PRG, view_str.as_ptr());
+            let texa_str = CStr::from_bytes_with_nul(b"subTexA\0").unwrap();
+            SPRITE_TEXA_UNI = gl::GetUniformLocation(SPRITE_PRG, texa_str.as_ptr());
+            let texb_str = CStr::from_bytes_with_nul(b"subTexB\0").unwrap();
+            SPRITE_TEXB_UNI = gl::GetUniformLocation(SPRITE_PRG, texb_str.as_ptr());
         }
     }
 }
@@ -315,6 +328,10 @@ impl Vector2 {
         Self { x: 1.0, y: 1.0 }
     }
 
+    pub fn scale(self, k: f32) -> Self {
+        (k * self.x, k * self.y).into()
+    }
+
     pub fn tuple(&self) -> (&f32, &f32) {
         (&self.x, &self.y)
     }
@@ -323,6 +340,14 @@ impl Vector2 {
 impl From<(f32, f32)> for Vector2 {
     fn from(item: (f32, f32)) -> Self {
         Vector2 { x: item.0, y: item.1 }
+    }
+}
+
+impl std::ops::Add for Vector2 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        (self.x + other.x, self.y + other.y).into()
     }
 }
 
