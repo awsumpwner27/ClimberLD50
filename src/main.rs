@@ -22,7 +22,7 @@ fn main() {
         gl_attr.set_context_flags().debug().set();
         gl_attr.set_context_version(3, 3);
     }
-    let window = vid_sys.window("ClimberLD50", 1024, 512)
+    let window = vid_sys.window("ClimberLD50 - Post-Jam Build 1", 1024, 512)
         .position_centered()
         .opengl()
         .build().unwrap();
@@ -55,35 +55,36 @@ fn main() {
     let mut time_accum = Duration::ZERO;
     let mut t = Duration::ZERO;
 
-    const DT: Duration = Duration::from_micros(13889);
+    const DT: Duration = Duration::from_micros(1_000_036 / 72);
 
     let (mut p_pos, mut p_vel): (_, Vector2) = (Vector2::zero(), (0.2, 0.5).into());
     let mut target_height = 0f32;
     let mut grounded = 0;
-    let mut platforms = [(Vector2::zero(), 3f32, false); 4];
+    let mut platforms = [(Vector2::zero(), 3f32, false, Vector2::zero()); 4];
 
-    let mut reset = || -> () {
+    let reset = |platforms: &mut [(Vector2, f32, bool, Vector2)], p_pos: &mut Vector2| {
         for (i, p) in platforms.iter_mut().enumerate() {
             p.0 = (6.0 * i as f32 - 8.0, 6.0 * i as f32).into();
             p.1 = 3f32;
             p.2 = false;
         }
-        p_pos = platforms[0].0;
+        *p_pos = platforms[0].0;
     };
 
     let mut plat_sprs = [Sprite::new(evil_tex); 4];
 
     let mut jump_btn = (false, false);
     
-    reset();
+    reset(&mut platforms, &mut p_pos);
 
     'game: loop {
         use sdl2::keyboard::Scancode;
         
         let time1 = Instant::now();
         let frame_dur = time1 - time0;
+        let frame_dur = frame_dur.min(Duration::from_secs_f32(0.25));
 
-        let mut input_dir = 0f32;
+        let mut input_dir;
 
         time0 = time1;
         time_accum += frame_dur;
@@ -99,7 +100,7 @@ fn main() {
                     }
                     Event::KeyDown { scancode, ..} => {
                         match scancode {
-                            Some(Scancode::Space) => {
+                            Some(Scancode::Space) | Some(Scancode::Up) | Some(Scancode::W) => {
                                 jump_btn.0 = true;
                             }
                             _ => {}
@@ -107,7 +108,7 @@ fn main() {
                     }
                     Event::KeyUp { scancode, ..} => {
                         match scancode {
-                            Some(Scancode::Space) => {
+                            Some(Scancode::Space) | Some(Scancode::Up) | Some(Scancode::W) => {
                                 jump_btn.0 = false;
                             }
                             _ => {}
@@ -119,50 +120,59 @@ fn main() {
 
             let key_state = event_pump.keyboard_state();
 
-            if key_state.is_scancode_pressed(Scancode::Left) {
+            input_dir = 0f32;
+            if
+                key_state.is_scancode_pressed(Scancode::Left) ||
+                key_state.is_scancode_pressed(Scancode::A)
+            {
                 input_dir -= 1f32;
             }
-            if key_state.is_scancode_pressed(Scancode::Right) {
+            if
+                key_state.is_scancode_pressed(Scancode::Right) ||
+                key_state.is_scancode_pressed(Scancode::D)
+            {
                 input_dir += 1f32;
             }
 
             if p_pos.y - camera.translation.y < -10f32 {
                 deathframe_count += 1;
                 if deathframe_count > 72 {
-                    for (i, p) in platforms.iter_mut().enumerate() {
-                        p.0 = (6.0 * i as f32 - 8.0, 8.0 * i as f32).into();
-                        p.1 = 3f32;
-                        p.2 = false;
-                    }
-                    p_pos = platforms[0].0;
+                    reset(&mut platforms, &mut p_pos);
                     p_vel = Vector2::zero();
                     camera.translation.y = 7f32;
                     target_height = 7f32;
                     deathframe_count = 0;
                     continue 'game;
                 } else {
+                    t += DT;
+                    time_accum -= DT;
                     continue;
                 }
             }
 
-            p_vel.y += -30f32 * DT.as_secs_f32();
+            p_vel.y += -35f32 * DT.as_secs_f32();
             p_pos = p_pos + p_vel.scale(DT.as_secs_f32());
 
             let mut no_touchy = true;
+
+            fn platform_fallrate(cam_height: f32) -> f32 {
+                ((cam_height - 6f32) / 32f32).min(5.0) * DT.as_secs_f32()
+            }
 
             if p_vel.y <= 0f32 {
                 for p in platforms.iter_mut() {
                     let touch_factor = if p.2 { 2f32 } else { 1f32 };
 
-                    if 
-                        (p_pos.x - p.0.x).abs() < p.1 * touch_factor &&
+                    if
+                        (p_pos.x - p.0.x).abs() < p.1 * touch_factor + 0.7 &&
                         (p_pos.y - (p.0.y - 0.15)).abs() < 0.3
                     {
                         p_vel.y = 0.0;
                         p_pos.y =
                             p.0.y -
-                            ((camera.translation.y - 7f32) / 32f32).min(5f32) * DT.as_secs_f32();
+                            1.1 * platform_fallrate(camera.translation.y);
                         grounded = 2;
+                        if !p.2 { p.3 = p.0; }
                         p.2 = true;
                         no_touchy = false;
 
@@ -176,37 +186,38 @@ fn main() {
                 }
             }
 
-            if no_touchy {
-                grounded = grounded.min(1);
+            if no_touchy && grounded != 1 {
+                grounded = grounded.min(0);
             }
 
-            if p_vel.x.abs() < 12f32 {
+            if p_vel.x * input_dir < 12.0 {
                 p_vel.x += 160f32 * input_dir * DT.as_secs_f32();
             }
             if grounded > 0 && jump_btn.0 && !jump_btn.1 {
                 if input_dir != 0f32 && grounded > 1 {
                     p_vel.y = 8.0;
-                    p_vel.x += input_dir * 6f32;
+                    p_vel.x = input_dir * 18f32;
                     grounded = 1;
+                    jump_btn.1 = true;
                 } else
                 if input_dir == 0f32 || grounded == 1 {
                     p_vel.y = 24.0;
                     grounded = 0;
                 }
             }
-            if input_dir == 0f32 {
-                p_vel.x *= 0.9f32;
+            if input_dir == 0f32 || p_vel.x * input_dir < 0.0 {
+                p_vel.x *= 0.8f32;
             }
 
             for p in platforms.iter_mut() {
                 if p.2 {
-                    p.0.y -= ((camera.translation.y - 6f32) / 32f32).min(5f32) * DT.as_secs_f32();
+                    p.0.y -= platform_fallrate(camera.translation.y);
                 }
 
-                if p.0.y - camera.translation.y < -8f32 {
+                if p.0.y - camera.translation.y < -8.0 - 2.0 {
                     p.0.x = rng.gen_range(-12f32..=12f32);
-                    p.0.y += 24f32 + rng.gen_range(-0.5f32..=0.5f32);
-                    p.1 = (p.1 - 0.2).max(1f32);
+                    p.0.y = (p.3.y + 24.0).round() + rng.gen_range(-0.5..=0.5);
+                    p.1 = (p.1 - 0.2).max(1.0);
                     p.2 = false;
                 }
             }
@@ -232,6 +243,14 @@ fn main() {
         }
 
         spr.transform.translation = p_pos;
+        if grounded == 1 {
+            use std::f32::consts::PI;
+
+            spr.transform.rotation = (p_vel.x / 18.0) * 15.0 * (PI / 180.0);
+        } else {
+            spr.transform.rotation = 0.0;
+        }
+
         unsafe { gl::Clear(gl::COLOR_BUFFER_BIT); }
         Sprite::begin(camera); {
             spr.draw();
